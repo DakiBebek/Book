@@ -81,12 +81,33 @@
     display:flex; align-items:center; justify-content:space-between; gap:1rem;
     padding:.9rem 1.2rem; background:#171410; color:var(--paper); flex-shrink:0;
   }
-  .reader-bar .title{font-family:'Fraunces',serif; font-size:1rem;}
-  .reader-body{flex:1; overflow:auto; background:#fff; display:flex; justify-content:center;}
-  #pdf-canvas{max-width:100%; height:auto; box-shadow:0 0 20px rgba(0,0,0,.2); margin:1.5rem auto;}
-  #epub-viewer{width:100%; height:100%;}
+  .reader-bar .title{font-family:'Fraunces',serif; font-size:1rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:30vw;}
+  .reader-body{flex:1; overflow:auto; background:#f3efe4; display:flex; justify-content:center; align-items:center; position:relative;}
+  .tools{display:flex; gap:.4rem; align-items:center; flex-wrap:wrap;}
+  .tool-btn{
+    background:none; border:1px solid #55503f; color:var(--paper); font-size:.82rem;
+    padding:.4em .7em; border-radius:20px; display:flex; align-items:center; gap:.35em;
+  }
+  .tool-btn.active{background:var(--gold); border-color:var(--gold); color:#221c0f; font-weight:600;}
+  .page-wrap{position:relative; margin:1.5rem auto; box-shadow:0 0 20px rgba(0,0,0,.2); line-height:0;}
+  #pdf-canvas{display:block; max-width:100%; height:auto;}
+  #pdf-overlay{position:absolute; top:0; left:0; width:100%; height:100%; touch-action:none;}
+  .tap-left,.tap-right{position:absolute; top:0; bottom:0; width:32%; z-index:2; cursor:pointer;}
+  .tap-left{left:0;} .tap-right{right:0;}
+  #epub-viewer{width:100%; height:100%; transition:opacity .18s ease;}
+  .epub-wrap{position:relative; width:100%; height:100%;}
   .page-nav{display:flex; gap:.5rem; align-items:center; color:var(--paper); font-size:.85rem;}
   .page-nav button{background:none;border:1px solid #6a6254; color:var(--paper); padding:.3em .8em; border-radius:3px;}
+  .bookmark-panel{
+    position:absolute; top:0; right:0; bottom:0; width:min(280px,80vw); background:#fff;
+    box-shadow:-6px 0 18px rgba(0,0,0,.15); padding:1.2rem; overflow-y:auto; transform:translateX(100%);
+    transition:transform .2s ease; z-index:10;
+  }
+  .bookmark-panel.open{transform:translateX(0);}
+  .bookmark-panel h3{margin-top:0; font-size:1.05rem;}
+  .bm-item{display:flex; justify-content:space-between; align-items:center; padding:.6em 0; border-bottom:1px solid var(--line); font-size:.88rem;}
+  .bm-item button{background:none; border:none; color:var(--rose); font-size:.9rem;}
+  .bm-empty{color:#7a715c; font-size:.85rem;}
   form .row2{display:flex; gap:1rem;}
   form .row2 > div{flex:1;}
   .admin-hint{font-size:.8rem; color:#7a715c; margin-top:.4em;}
@@ -279,6 +300,35 @@ async function handleUpload(e){
   }
 }
 
+// ---------------- ANOTASI & BOOKMARK (data) ----------------
+async function fetchAnnotations(bookId){
+  const {data, error} = await sb.from('annotations').select('*').eq('book_id', bookId).eq('user_id', state.user.id);
+  if(error){ console.error(error); return []; }
+  return data;
+}
+async function fetchBookmarks(bookId){
+  const {data, error} = await sb.from('bookmarks').select('*').eq('book_id', bookId).eq('user_id', state.user.id).order('created_at');
+  if(error){ console.error(error); return []; }
+  return data;
+}
+async function saveAnnotation(bookId, type, location, points){
+  const {data, error} = await sb.from('annotations').insert({
+    book_id:bookId, user_id:state.user.id, type, location, points: points||null
+  }).select().single();
+  if(error){ console.error(error); return null; }
+  return data;
+}
+async function saveBookmark(bookId, location, label){
+  const {data, error} = await sb.from('bookmarks').insert({
+    book_id:bookId, user_id:state.user.id, location, label
+  }).select().single();
+  if(error){ console.error(error); return null; }
+  return data;
+}
+async function deleteBookmark(id){
+  await sb.from('bookmarks').delete().eq('id', id);
+}
+
 // ---------------- READER ----------------
 async function openBook(id){
   const book = state.books.find(b=>b.id===id);
@@ -287,44 +337,245 @@ async function openBook(id){
   if(error){ alert('Gagal membuka buku: '+error.message); return; }
   const url = data.signedUrl;
 
+  let mode = 'nav'; // 'nav' | 'highlight' | 'strike'
+  let annotations = await fetchAnnotations(book.id);
+  let bookmarks = await fetchBookmarks(book.id);
+
   const overlay = document.createElement('div');
   overlay.className = 'reader-overlay';
   overlay.innerHTML = `
     <div class="reader-bar">
       <div class="title serif">${escapeHtml(book.title)}</div>
-      <div class="page-nav" id="reader-controls"></div>
+      <div class="tools">
+        <button class="tool-btn active" id="mode-nav" title="Mode baca">👆</button>
+        <button class="tool-btn" id="mode-highlight" title="Stabilo">🖍️ Stabilo</button>
+        <button class="tool-btn" id="mode-strike" title="Coret">✏️ Coret</button>
+        <button class="tool-btn" id="bookmark-btn" title="Tandai halaman ini">🔖 Tandai</button>
+        <button class="tool-btn" id="bookmark-list-btn" title="Daftar bookmark">📑 <span id="bm-count">${bookmarks.length}</span></button>
+      </div>
       <button class="btn ghost" id="close-reader">Tutup</button>
     </div>
-    <div class="reader-body">
-      ${book.file_type==='pdf' ? `<canvas id="pdf-canvas"></canvas>` : `<div id="epub-viewer"></div>`}
+    <div class="reader-body" id="reader-body">
+      ${book.file_type==='pdf'
+        ? `<div class="page-wrap" id="page-wrap">
+             <canvas id="pdf-canvas"></canvas>
+             <canvas id="pdf-overlay"></canvas>
+             <div class="tap-left" id="tap-left"></div>
+             <div class="tap-right" id="tap-right"></div>
+           </div>`
+        : `<div class="epub-wrap" id="page-wrap">
+             <div id="epub-viewer"></div>
+             <div class="tap-left" id="tap-left"></div>
+             <div class="tap-right" id="tap-right"></div>
+           </div>`}
+      <div class="bookmark-panel" id="bookmark-panel">
+        <h3 class="serif">Bookmark</h3>
+        <div id="bookmark-list"></div>
+      </div>
     </div>`;
   document.body.appendChild(overlay);
   document.getElementById('close-reader').onclick = ()=> overlay.remove();
+
+  const pageWrap = document.getElementById('page-wrap');
+  const tapLeft = document.getElementById('tap-left');
+  const tapRight = document.getElementById('tap-right');
+  const bmPanel = document.getElementById('bookmark-panel');
+
+  function setMode(m){
+    mode = m;
+    ['nav','highlight','strike'].forEach(k=>{
+      document.getElementById('mode-'+k).classList.toggle('active', k===mode);
+    });
+    updateTapZones();
+  }
+  document.getElementById('mode-nav').onclick = ()=> setMode('nav');
+  document.getElementById('mode-highlight').onclick = ()=> setMode('highlight');
+  document.getElementById('mode-strike').onclick = ()=> setMode('strike');
+  document.getElementById('bookmark-list-btn').onclick = ()=> bmPanel.classList.toggle('open');
+
+  function renderBookmarkList(){
+    const list = document.getElementById('bookmark-list');
+    document.getElementById('bm-count').textContent = bookmarks.length;
+    if(bookmarks.length===0){ list.innerHTML = `<p class="bm-empty">Belum ada bookmark.</p>`; return; }
+    list.innerHTML = bookmarks.map(b=>`
+      <div class="bm-item">
+        <span data-jump="${b.id}" style="cursor:pointer;">${escapeHtml(b.label)}</span>
+        <button data-del="${b.id}">🗑</button>
+      </div>`).join('');
+    list.querySelectorAll('[data-jump]').forEach(el=>{
+      el.onclick = ()=>{
+        const bm = bookmarks.find(x=>x.id===el.dataset.jump);
+        jumpTo(bm.location);
+        bmPanel.classList.remove('open');
+      };
+    });
+    list.querySelectorAll('[data-del]').forEach(el=>{
+      el.onclick = async ()=>{
+        await deleteBookmark(el.dataset.del);
+        bookmarks = bookmarks.filter(x=>x.id!==el.dataset.del);
+        renderBookmarkList();
+      };
+    });
+  }
+  renderBookmarkList();
+
+  function animateTurn(dir, doChange){
+    pageWrap.style.transition = 'transform .16s ease, opacity .16s ease';
+    pageWrap.style.transform = `translateX(${dir==='next'?'-24px':'24px'})`;
+    pageWrap.style.opacity = '0';
+    setTimeout(async ()=>{
+      await doChange();
+      pageWrap.style.transition = 'none';
+      pageWrap.style.transform = `translateX(${dir==='next'?'24px':'-24px'})`;
+      requestAnimationFrame(()=>{
+        pageWrap.style.transition = 'transform .16s ease, opacity .16s ease';
+        pageWrap.style.transform = 'translateX(0)';
+        pageWrap.style.opacity = '1';
+      });
+    }, 160);
+  }
+
+  let jumpTo, updateTapZones;
 
   if(book.file_type==='pdf'){
     let pdfDoc=null, pageNum=1;
     const canvas = document.getElementById('pdf-canvas');
     const ctx = canvas.getContext('2d');
+    const overlayCanvas = document.getElementById('pdf-overlay');
+    const octx = overlayCanvas.getContext('2d');
+
+    updateTapZones = ()=>{
+      overlayCanvas.style.pointerEvents = (mode==='nav') ? 'none' : 'auto';
+      tapLeft.style.pointerEvents = (mode==='nav') ? 'auto' : 'none';
+      tapRight.style.pointerEvents = (mode==='nav') ? 'auto' : 'none';
+    };
+
+    function strokeStyleFor(type){
+      return type==='highlight'
+        ? {lineWidth:16, alpha:.35, color:'#ffd43b', cap:'round'}
+        : {lineWidth:3, alpha:.9, color:'#e03131', cap:'round'};
+    }
+    function drawStroke(points, type){
+      if(points.length<2) return;
+      const s = strokeStyleFor(type);
+      octx.save();
+      octx.globalAlpha = s.alpha; octx.strokeStyle = s.color; octx.lineWidth = s.lineWidth; octx.lineCap = s.cap; octx.lineJoin='round';
+      octx.beginPath();
+      points.forEach((p,i)=>{
+        const x=p.x*overlayCanvas.width, y=p.y*overlayCanvas.height;
+        if(i===0) octx.moveTo(x,y); else octx.lineTo(x,y);
+      });
+      octx.stroke();
+      octx.restore();
+    }
+
     async function renderPage(n){
       const page = await pdfDoc.getPage(n);
       const viewport = page.getViewport({scale:1.4});
       canvas.width = viewport.width; canvas.height = viewport.height;
+      overlayCanvas.width = viewport.width; overlayCanvas.height = viewport.height;
       await page.render({canvasContext:ctx, viewport}).promise;
-      document.getElementById('reader-controls').innerHTML = `
-        <button id="prev-p">‹ Sebelumnya</button><span>${n} / ${pdfDoc.numPages}</span><button id="next-p">Berikutnya ›</button>`;
-      document.getElementById('prev-p').onclick = ()=>{ if(pageNum>1){pageNum--; renderPage(pageNum);} };
-      document.getElementById('next-p').onclick = ()=>{ if(pageNum<pdfDoc.numPages){pageNum++; renderPage(pageNum);} };
+      octx.clearRect(0,0,overlayCanvas.width,overlayCanvas.height);
+      annotations.filter(a=>a.location===String(n)).forEach(a=> drawStroke(a.points, a.type));
+      document.getElementById('bookmark-btn').onclick = async ()=>{
+        const bm = await saveBookmark(book.id, String(n), `Halaman ${n}`);
+        if(bm){ bookmarks.push(bm); renderBookmarkList(); }
+      };
     }
+    jumpTo = (loc)=>{ pageNum = parseInt(loc,10); renderPage(pageNum); };
+
+    tapLeft.onclick = ()=>{ if(pageNum>1) animateTurn('prev', async ()=>{ pageNum--; await renderPage(pageNum); }); };
+    tapRight.onclick = ()=>{ if(pageNum<pdfDoc.numPages) animateTurn('next', async ()=>{ pageNum++; await renderPage(pageNum); }); };
+
+    let drawing=false, currentPoints=[];
+    function posFromEvent(e){
+      const rect = overlayCanvas.getBoundingClientRect();
+      return {x:(e.clientX-rect.left)/rect.width, y:(e.clientY-rect.top)/rect.height};
+    }
+    overlayCanvas.addEventListener('pointerdown', e=>{
+      if(mode==='nav') return;
+      drawing=true; currentPoints=[posFromEvent(e)];
+    });
+    overlayCanvas.addEventListener('pointermove', e=>{
+      if(!drawing) return;
+      currentPoints.push(posFromEvent(e));
+      octx.clearRect(0,0,overlayCanvas.width,overlayCanvas.height);
+      annotations.filter(a=>a.location===String(pageNum)).forEach(a=> drawStroke(a.points, a.type));
+      drawStroke(currentPoints, mode);
+    });
+    async function endStroke(){
+      if(!drawing) return;
+      drawing=false;
+      if(currentPoints.length>1){
+        const saved = await saveAnnotation(book.id, mode, String(pageNum), currentPoints);
+        if(saved) annotations.push(saved);
+      }
+      currentPoints=[];
+    }
+    overlayCanvas.addEventListener('pointerup', endStroke);
+    overlayCanvas.addEventListener('pointerleave', endStroke);
+
     pdfDoc = await pdfjsLib.getDocument(url).promise;
+    updateTapZones();
     renderPage(pageNum);
+
   } else {
     const epubBook = ePub(url);
     const rendition = epubBook.renderTo('epub-viewer', {width:'100%', height:'100%'});
     rendition.display();
-    document.getElementById('reader-controls').innerHTML = `
-      <button id="prev-p">‹ Sebelumnya</button><button id="next-p">Berikutnya ›</button>`;
-    document.getElementById('prev-p').onclick = ()=> rendition.prev();
-    document.getElementById('next-p').onclick = ()=> rendition.next();
+
+    rendition.themes.default({
+      '.pustaka-highlight': { fill:'#ffd43b', 'fill-opacity':'0.4' },
+      '.pustaka-strike': { stroke:'#e03131', 'stroke-width':'2px' }
+    });
+
+    function reapplyAnnotations(){
+      annotations.forEach(a=>{
+        try{
+          if(a.type==='highlight'){
+            rendition.annotations.add('highlight', a.location, {}, null, 'pustaka-highlight');
+          } else {
+            rendition.annotations.add('strikethrough', a.location, {}, null, 'pustaka-strike');
+          }
+        }catch(e){ /* lokasi mungkin di chapter lain, biarkan */ }
+      });
+    }
+    rendition.on('rendered', reapplyAnnotations);
+
+    rendition.on('selected', async (cfiRange, contents)=>{
+      if(mode==='nav') return;
+      const type = mode; // 'highlight' | 'strike'
+      const epubType = type==='highlight' ? 'highlight' : 'strikethrough';
+      const cls = type==='highlight' ? 'pustaka-highlight' : 'pustaka-strike';
+      rendition.annotations.add(epubType, cfiRange, {}, null, cls);
+      const saved = await saveAnnotation(book.id, type, cfiRange, null);
+      if(saved) annotations.push(saved);
+      contents.window.getSelection().removeAllRanges();
+    });
+
+    updateTapZones = ()=>{
+      tapLeft.style.pointerEvents = (mode==='nav') ? 'auto' : 'none';
+      tapRight.style.pointerEvents = (mode==='nav') ? 'auto' : 'none';
+    };
+    jumpTo = (loc)=> rendition.display(loc);
+
+    function fadeTurn(action){
+      const v = document.getElementById('epub-viewer');
+      v.style.opacity = '0';
+      setTimeout(()=>{ action(); setTimeout(()=> v.style.opacity='1', 30); }, 150);
+    }
+    tapLeft.onclick = ()=> fadeTurn(()=> rendition.prev());
+    tapRight.onclick = ()=> fadeTurn(()=> rendition.next());
+
+    document.getElementById('bookmark-btn').onclick = async ()=>{
+      const loc = rendition.currentLocation();
+      if(!loc || !loc.start) return;
+      const cfi = loc.start.cfi;
+      const bm = await saveBookmark(book.id, cfi, `Bookmark ${bookmarks.length+1}`);
+      if(bm){ bookmarks.push(bm); renderBookmarkList(); }
+    };
+
+    updateTapZones();
   }
 }
 
