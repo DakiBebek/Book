@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pustaka</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,500;0,600;1,500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/epubjs/dist/epub.min.js"></script>
+<style>
+  :root{
+    --ink:#211d17; --paper:#efe8d8; --paper-2:#e4dcc8;
+    --forest:#2f4b3c; --forest-dark:#213a2d; --gold:#a9823f;
+    --rose:#8c3a2b; --line:#c9bfa4;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{
+    background:var(--paper); color:var(--ink);
+    font-family:'IBM Plex Sans',sans-serif;
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  h1,h2,h3,.serif{font-family:'Fraunces',serif;}
+  a{color:inherit;}
+  button{font-family:inherit;cursor:pointer;}
+  .btn{
+    background:var(--forest); color:var(--paper); border:none;
+    padding:.7em 1.3em; border-radius:3px; font-size:.95rem; font-weight:500;
+    transition:background .15s;
+  }
+  .btn:hover{background:var(--forest-dark);}
+  .btn.ghost{background:transparent; color:var(--forest); border:1px solid var(--forest);}
+  .btn.ghost:hover{background:var(--forest); color:var(--paper);}
+  .btn.danger{background:var(--rose);}
+  input,textarea,select{
+    width:100%; padding:.6em .7em; border:1px solid var(--line); border-radius:3px;
+    background:#fff; font-family:inherit; font-size:.95rem; color:var(--ink);
+  }
+  label{font-size:.85rem; font-weight:500; display:block; margin-bottom:.3em; margin-top:1em;}
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:1.1rem 1.5rem; border-bottom:1px solid var(--line);
+    top:env(safe-area-inset-top,0px); position:sticky; background:var(--paper); z-index:5;
+  }
+  .wordmark{font-size:1.5rem; font-style:italic; font-weight:600; letter-spacing:.2px;}
+  .nav{display:flex; gap:.6rem; align-items:center;}
+  main{max-width:1100px; margin:0 auto; padding:2rem 1.5rem 4rem;}
+  .shelf{
+    display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:1.8rem 1.4rem;
+  }
+  .book{cursor:pointer; text-align:left;}
+  .cover{
+    aspect-ratio:2/3; border-radius:2px; background:var(--forest);
+    box-shadow:3px 4px 0 rgba(33,29,23,.15);
+    display:flex; align-items:flex-end; padding:.8em; color:var(--paper);
+    background-size:cover; background-position:center;
+    transition:transform .15s;
+  }
+  .book:hover .cover{transform:translateY(-3px);}
+  .cover span{font-family:'Fraunces',serif; font-weight:600; font-size:.95rem; line-height:1.25;}
+  .book .meta{margin-top:.5em; font-size:.82rem; color:#5a5344;}
+  .book .meta b{display:block; color:var(--ink); font-size:.9rem; font-weight:600;}
+  .empty{color:#7a715c; padding:3rem 0; text-align:center; font-size:.95rem;}
+  .card{
+    max-width:380px; margin:3rem auto; background:#fff; border:1px solid var(--line);
+    border-radius:4px; padding:2rem;
+  }
+  .card h2{margin-top:0;}
+  .toggle-line{margin-top:1.2em; font-size:.9rem; color:#5a5344;}
+  .toggle-line button{background:none; border:none; color:var(--forest); font-weight:600; text-decoration:underline; padding:0;}
+  .err{color:var(--rose); font-size:.85rem; margin-top:.8em;}
+  .ok{color:var(--forest); font-size:.85rem; margin-top:.8em;}
+  .reader-overlay{
+    position:fixed; inset:0; background:var(--ink); z-index:50; display:flex; flex-direction:column;
+    padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  .reader-bar{
+    display:flex; align-items:center; justify-content:space-between; gap:1rem;
+    padding:.9rem 1.2rem; background:#171410; color:var(--paper); flex-shrink:0;
+  }
+  .reader-bar .title{font-family:'Fraunces',serif; font-size:1rem;}
+  .reader-body{flex:1; overflow:auto; background:#fff; display:flex; justify-content:center;}
+  #pdf-canvas{max-width:100%; height:auto; box-shadow:0 0 20px rgba(0,0,0,.2); margin:1.5rem auto;}
+  #epub-viewer{width:100%; height:100%;}
+  .page-nav{display:flex; gap:.5rem; align-items:center; color:var(--paper); font-size:.85rem;}
+  .page-nav button{background:none;border:1px solid #6a6254; color:var(--paper); padding:.3em .8em; border-radius:3px;}
+  form .row2{display:flex; gap:1rem;}
+  form .row2 > div{flex:1;}
+  .admin-hint{font-size:.8rem; color:#7a715c; margin-top:.4em;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+// ====== KONFIGURASI SUPABASE — isi sebelum pakai (lihat SETUP.md) ======
+const SUPABASE_URL = "ISI_URL_SUPABASE_KAMU";
+const SUPABASE_ANON_KEY = "ISI_ANON_KEY_KAMU";
+// =========================================================================
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const app = document.getElementById('app');
+let state = { user:null, profile:null, books:[], view:'loading', authMode:'login' };
+
+function render(){
+  if(state.view==='loading'){ app.innerHTML = `<main><p class="empty">Memuat…</p></main>`; return; }
+  if(state.view==='auth'){ renderAuth(); return; }
+  if(state.view==='library'){ renderLibrary(); return; }
+  if(state.view==='upload'){ renderUpload(); return; }
+}
+
+function topbar(){
+  return `
+  <div class="topbar">
+    <div class="wordmark">Pustaka</div>
+    <div class="nav">
+      ${state.profile && state.profile.role==='admin' ? `<button class="btn ghost" data-nav="upload">Upload Buku</button>` : ''}
+      <button class="btn ghost" id="logout-btn">Keluar</button>
+    </div>
+  </div>`;
+}
+
+// ---------------- AUTH VIEW ----------------
+function renderAuth(){
+  const isLogin = state.authMode==='login';
+  app.innerHTML = `
+    <div class="topbar"><div class="wordmark">Pustaka</div><div></div></div>
+    <main>
+      <div class="card">
+        <h2>${isLogin?'Masuk':'Daftar akun'}</h2>
+        <form id="auth-form">
+          <label>Email</label>
+          <input type="email" id="email" required>
+          <label>Kata sandi</label>
+          <input type="password" id="password" required minlength="6">
+          <button class="btn" style="margin-top:1.4em; width:100%;" type="submit">${isLogin?'Masuk':'Daftar'}</button>
+        </form>
+        <div id="auth-msg"></div>
+        <p class="toggle-line">
+          ${isLogin? 'Belum punya akun?' : 'Sudah punya akun?'}
+          <button id="toggle-auth">${isLogin?'Daftar di sini':'Masuk di sini'}</button>
+        </p>
+      </div>
+    </main>`;
+  document.getElementById('toggle-auth').onclick = ()=>{ state.authMode = isLogin?'register':'login'; render(); };
+  document.getElementById('auth-form').onsubmit = async (e)=>{
+    e.preventDefault();
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    const msg = document.getElementById('auth-msg');
+    msg.innerHTML = '';
+    try{
+      if(isLogin){
+        const {error} = await sb.auth.signInWithPassword({email,password});
+        if(error) throw error;
+        await afterLogin();
+      } else {
+        const {error} = await sb.auth.signUp({email,password});
+        if(error) throw error;
+        msg.innerHTML = `<p class="ok">Akun dibuat. Kalau verifikasi email aktif, cek inbox kamu dulu sebelum masuk.</p>`;
+        const {data:{session}} = await sb.auth.getSession();
+        if(session){ await afterLogin(); }
+      }
+    }catch(err){
+      msg.innerHTML = `<p class="err">${err.message}</p>`;
+    }
+  };
+}
+
+// ---------------- LIBRARY VIEW ----------------
+function renderLibrary(){
+  const books = state.books;
+  app.innerHTML = `
+    ${topbar()}
+    <main>
+      <h1 class="serif" style="font-weight:500; margin-bottom:1.6rem;">Rak buku</h1>
+      ${books.length===0 ? `<p class="empty">Belum ada buku di rak. ${state.profile?.role==='admin'?'Klik "Upload Buku" untuk menambahkan.':''}</p>` : `
+      <div class="shelf">
+        ${books.map(b=>`
+          <div class="book" data-open="${b.id}">
+            <div class="cover" style="${b.coverUrl?`background-image:url('${b.coverUrl}')`:''}">
+              ${!b.coverUrl?`<span>${escapeHtml(b.title)}</span>`:''}
+            </div>
+            <div class="meta"><b>${escapeHtml(b.title)}</b>${b.author?escapeHtml(b.author):''}</div>
+          </div>
+        `).join('')}
+      </div>`}
+    </main>`;
+  document.getElementById('logout-btn').onclick = doLogout;
+  document.querySelectorAll('[data-nav="upload"]').forEach(el=> el.onclick = ()=>{ state.view='upload'; render(); });
+  document.querySelectorAll('[data-open]').forEach(el=> el.onclick = ()=> openBook(el.dataset.open));
+}
+
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// ---------------- UPLOAD VIEW (admin) ----------------
+function renderUpload(){
+  app.innerHTML = `
+    ${topbar()}
+    <main>
+      <div class="card" style="max-width:520px;">
+        <h2>Upload buku baru</h2>
+        <form id="upload-form">
+          <label>Judul</label>
+          <input id="f-title" required>
+          <label>Penulis</label>
+          <input id="f-author">
+          <label>Deskripsi singkat</label>
+          <textarea id="f-desc" rows="3"></textarea>
+          <div class="row2">
+            <div>
+              <label>Format</label>
+              <select id="f-type">
+                <option value="pdf">PDF</option>
+                <option value="epub">EPUB</option>
+              </select>
+            </div>
+            <div>
+              <label>Sampul (opsional, gambar)</label>
+              <input id="f-cover" type="file" accept="image/*">
+            </div>
+          </div>
+          <label>File buku</label>
+          <input id="f-file" type="file" accept=".pdf,.epub" required>
+          <div class="admin-hint">File buku disimpan di bucket privat, hanya bisa dibuka pengguna yang login.</div>
+          <button class="btn" style="margin-top:1.4em; width:100%;" type="submit">Simpan &amp; unggah</button>
+        </form>
+        <div id="upload-msg"></div>
+      </div>
+    </main>`;
+  document.getElementById('logout-btn').onclick = doLogout;
+  document.getElementById('upload-form').onsubmit = handleUpload;
+}
+
+async function handleUpload(e){
+  e.preventDefault();
+  const msg = document.getElementById('upload-msg');
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+  const title = document.getElementById('f-title').value.trim();
+  const author = document.getElementById('f-author').value.trim();
+  const description = document.getElementById('f-desc').value.trim();
+  const file_type = document.getElementById('f-type').value;
+  const coverFile = document.getElementById('f-cover').files[0];
+  const bookFile = document.getElementById('f-file').files[0];
+  if(!bookFile){ msg.innerHTML = `<p class="err">Pilih file buku dulu.</p>`; return; }
+
+  submitBtn.disabled = true; msg.innerHTML = `<p class="ok">Mengunggah…</p>`;
+  try{
+    const stamp = Date.now();
+    const safeName = bookFile.name.replace(/[^a-zA-Z0-9.\-_]/g,'_');
+    const filePath = `${state.user.id}/${stamp}_${safeName}`;
+    const {error:upErr} = await sb.storage.from('books').upload(filePath, bookFile);
+    if(upErr) throw upErr;
+
+    let coverPath = null;
+    if(coverFile){
+      const safeCover = coverFile.name.replace(/[^a-zA-Z0-9.\-_]/g,'_');
+      coverPath = `${state.user.id}/${stamp}_${safeCover}`;
+      const {error:coverErr} = await sb.storage.from('covers').upload(coverPath, coverFile);
+      if(coverErr) throw coverErr;
+    }
+
+    const {error:insErr} = await sb.from('books').insert({
+      title, author, description, file_type, file_path:filePath, cover_path:coverPath, uploaded_by:state.user.id
+    });
+    if(insErr) throw insErr;
+
+    msg.innerHTML = `<p class="ok">Buku berhasil diunggah.</p>`;
+    await loadBooks();
+    setTimeout(()=>{ state.view='library'; render(); }, 700);
+  }catch(err){
+    msg.innerHTML = `<p class="err">${err.message}</p>`;
+    submitBtn.disabled = false;
+  }
+}
+
+// ---------------- READER ----------------
+async function openBook(id){
+  const book = state.books.find(b=>b.id===id);
+  if(!book) return;
+  const {data, error} = await sb.storage.from('books').createSignedUrl(book.file_path, 3600);
+  if(error){ alert('Gagal membuka buku: '+error.message); return; }
+  const url = data.signedUrl;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'reader-overlay';
+  overlay.innerHTML = `
+    <div class="reader-bar">
+      <div class="title serif">${escapeHtml(book.title)}</div>
+      <div class="page-nav" id="reader-controls"></div>
+      <button class="btn ghost" id="close-reader">Tutup</button>
+    </div>
+    <div class="reader-body">
+      ${book.file_type==='pdf' ? `<canvas id="pdf-canvas"></canvas>` : `<div id="epub-viewer"></div>`}
+    </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('close-reader').onclick = ()=> overlay.remove();
+
+  if(book.file_type==='pdf'){
+    let pdfDoc=null, pageNum=1;
+    const canvas = document.getElementById('pdf-canvas');
+    const ctx = canvas.getContext('2d');
+    async function renderPage(n){
+      const page = await pdfDoc.getPage(n);
+      const viewport = page.getViewport({scale:1.4});
+      canvas.width = viewport.width; canvas.height = viewport.height;
+      await page.render({canvasContext:ctx, viewport}).promise;
+      document.getElementById('reader-controls').innerHTML = `
+        <button id="prev-p">‹ Sebelumnya</button><span>${n} / ${pdfDoc.numPages}</span><button id="next-p">Berikutnya ›</button>`;
+      document.getElementById('prev-p').onclick = ()=>{ if(pageNum>1){pageNum--; renderPage(pageNum);} };
+      document.getElementById('next-p').onclick = ()=>{ if(pageNum<pdfDoc.numPages){pageNum++; renderPage(pageNum);} };
+    }
+    pdfDoc = await pdfjsLib.getDocument(url).promise;
+    renderPage(pageNum);
+  } else {
+    const epubBook = ePub(url);
+    const rendition = epubBook.renderTo('epub-viewer', {width:'100%', height:'100%'});
+    rendition.display();
+    document.getElementById('reader-controls').innerHTML = `
+      <button id="prev-p">‹ Sebelumnya</button><button id="next-p">Berikutnya ›</button>`;
+    document.getElementById('prev-p').onclick = ()=> rendition.prev();
+    document.getElementById('next-p').onclick = ()=> rendition.next();
+  }
+}
+
+// ---------------- DATA / SESSION ----------------
+async function loadBooks(){
+  const {data, error} = await sb.from('books').select('*').order('created_at',{ascending:false});
+  if(error){ console.error(error); state.books=[]; return; }
+  state.books = await Promise.all(data.map(async b=>{
+    let coverUrl = null;
+    if(b.cover_path){
+      const {data:pub} = sb.storage.from('covers').getPublicUrl(b.cover_path);
+      coverUrl = pub.publicUrl;
+    }
+    return {...b, coverUrl};
+  }));
+}
+
+async function afterLogin(){
+  const {data:{user}} = await sb.auth.getUser();
+  state.user = user;
+  const {data:profile} = await sb.from('profiles').select('*').eq('id', user.id).single();
+  state.profile = profile;
+  await loadBooks();
+  state.view = 'library';
+  render();
+}
+
+async function doLogout(){
+  await sb.auth.signOut();
+  state = { user:null, profile:null, books:[], view:'auth', authMode:'login' };
+  render();
+}
+
+(async function init(){
+  const {data:{session}} = await sb.auth.getSession();
+  if(session){ await afterLogin(); }
+  else { state.view='auth'; render(); }
+})();
+</script>
+</body>
+</html>
